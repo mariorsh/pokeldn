@@ -1,6 +1,7 @@
 /* Native C6 radio transport. Only the link changes: radio.c retains all LDN Wi-Fi hooks. */
 #include "wire.h"
 #include "packet.h"
+#include "ota_guard.h"
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ uint32_t wire_rx_frame_err(void) { return 0; }
 uint32_t wire_events_full(void) { return 0; }
 int wire_stats(char *text, size_t size)
 {
-    return snprintf(text, size, "link=sdio sdio_queue=%u", (unsigned)uxQueueMessagesWaiting(s_out));
+    return snprintf(text, size, "link=sdio sdio_queue=%u ota_pending=%u ota_fallback=%#x", (unsigned)uxQueueMessagesWaiting(s_out), ota_guard_pending(), ota_guard_fallback());
 }
 
 static void writer(void *arg)
@@ -84,7 +85,7 @@ static void reader(void *arg)
             size_t length;
             if (!fragmented && jc_packet_unpack(data, size, &type, &payload, &length)) {
                 atomic_fetch_add(&s_consumed, size);
-                s_handler(type, payload, length);
+                if (!ota_guard_command(type, payload, length)) s_handler(type, payload, length);
             } else atomic_fetch_add(&s_bad, 1);
             ESP_ERROR_CHECK(sdio_slave_recv_load_buf(handle));
             if (err == ESP_OK) break;

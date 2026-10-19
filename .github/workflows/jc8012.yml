@@ -6,6 +6,8 @@ on:
       - firmware/jc8012p4/**
       - firmware/esp32/main/**
       - scripts/build_jc8012.py
+      - scripts/build_jc8012_installer.py
+      - tools/ldn/jc8012_ota.py
       - .github/workflows/jc8012.yml
 permissions:
   contents: read
@@ -20,10 +22,12 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           python scripts/build_jc8012.py
+          python scripts/build_jc8012_installer.py --ota
       - uses: actions/upload-artifact@v7
         with:
           name: jc8012-firmware-experimental
           path: |
             dist/jc8012p4/pokechanger-*.bin
             dist/jc8012p4/manifest.json
+            dist/jc8012p4/pokechanger-installer-ota.json
             dist/jc8012p4/SHA256SUMS

@@ -7,6 +7,7 @@
 #include "esp_serial_slave_link/essl_sdio.h"
 #include "esp_timer.h"
 #include "esp_chip_info.h"
+#include "esp_attr.h"
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -20,7 +21,7 @@
 static essl_handle_t s_link;
 static SemaphoreHandle_t s_bus;
 static atomic_bool s_ready;
-static atomic_uint s_stage, s_signature;
+static atomic_uint s_stage, s_signature, s_sdio_error;
 static sdmmc_card_t s_card;
 
 static void result(uint8_t type, esp_err_t error)
@@ -39,10 +40,10 @@ static void panel_status(const uint8_t *radio, size_t length)
     char text[1280];
     int n = snprintf(text, sizeof(text),
         "%.*s bridge=jc8012p4 bridge_ready=%u bridge_stage=%u c6_signature=%08x "
-        "p4_revision=%u psram_bytes=%u p4_heap=%u p4_wire_dropped=%u p4_wire_bad=%u lcd_frames=%u",
+        "p4_revision=%u psram_bytes=%u p4_heap=%u p4_wire_dropped=%u p4_wire_bad=%u lcd_frames=%u sdio_error=%#x",
         (int)length, radio ? (const char *)radio : "", (unsigned)atomic_load(&s_ready),
         atomic_load(&s_stage), atomic_load(&s_signature), (unsigned)chip.revision,
-        (unsigned)esp_psram_get_size(), (unsigned)esp_get_free_heap_size(), (unsigned)wire_dropped(), (unsigned)wire_rx_bad(), jc_panel_frames());
+        (unsigned)esp_psram_get_size(), (unsigned)esp_get_free_heap_size(), (unsigned)wire_dropped(), (unsigned)wire_rx_bad(), jc_panel_frames(), atomic_load(&s_sdio_error));
     if (n > 0) wire_send(0x89, text, (size_t)n < sizeof(text) ? n : sizeof(text) - 1, NULL, 0);
 }
 static void command(uint8_t type, const uint8_t *p, size_t n)
@@ -71,7 +72,7 @@ static void command(uint8_t type, const uint8_t *p, size_t n)
         return;
     }
     /* The serial reader owns this buffer. ESSL waits for C6 receive-buffer credits before sending. */
-    static uint8_t tx[JC_SDIO_BUFFER] __attribute__((aligned(4)));
+    static DMA_ATTR uint8_t tx[JC_SDIO_BUFFER] __attribute__((aligned(64)));
     size_t size = jc_packet_pack(tx, sizeof(tx), type, p, n, NULL, 0);
     if (!size) { result(type, ESP_ERR_INVALID_SIZE); return; }
     xSemaphoreTake(s_bus, portMAX_DELAY);
@@ -85,7 +86,7 @@ static void command(uint8_t type, const uint8_t *p, size_t n)
 
 static void receive(void *arg)
 {
-    static uint8_t rx[JC_SDIO_BUFFER] __attribute__((aligned(4)));
+    static DMA_ATTR uint8_t rx[JC_SDIO_BUFFER] __attribute__((aligned(64)));
     for (;;) {
         size_t size = 0;
         xSemaphoreTake(s_bus, portMAX_DELAY);
@@ -106,6 +107,8 @@ static void receive(void *arg)
                 else if (type != 0x8b) wire_send(type, p, n, NULL, 0);
             } else jc_panel_note("Paquete SDIO invalido");
         } else if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NOT_FOUND) {
+            atomic_store(&s_sdio_error, err);
+            wire_log("SDIO receive failed: %s (%#x)", esp_err_to_name(err), err);
             /* Do not forward fragments or spin on a broken bus. Requires reset of both chips. */
             atomic_store(&s_ready, false);
             atomic_store(&s_stage, 6);

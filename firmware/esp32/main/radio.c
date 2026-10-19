@@ -24,6 +24,9 @@
 #include "usbwatch.h"
 #include "ble.h"
 #include "wire.h"
+#if POKELDN_JC8012_C6
+#include "ota_guard.h"
+#endif
 
 #define PROTOCOL_VERSION 1
 
@@ -834,6 +837,9 @@ void app_main(void)
         r = nvs_flash_init();
     }
     ESP_ERROR_CHECK(r);
+#if POKELDN_JC8012_C6
+    ota_guard_start();
+#endif
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     const wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));

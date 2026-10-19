@@ -9,8 +9,8 @@ nav_order: 3
 Adaptación experimental de [Decryptu/pokeldn](https://github.com/Decryptu/pokeldn) para usar
 la placa como comunicador USB con la Switch y mostrar los eventos en su pantalla de 10,1 pulgadas.
 **Ambos firmwares compilan con ESP-IDF v6.1. USB y pantalla ya se han probado en una placa real.**
-La radio C6 y la comunicación con una Switch siguen pendientes de validación: el C6 de la unidad
-probada responde a SDIO, pero todavía no contiene el firmware de radio de esta adaptación.
+La radio C6 ya se ha instalado mediante OTA por SDIO sin adaptador externo y responde a HELLO,
+BENCH, SNIFF y AP_START. La comunicación LDN con una Switch sigue pendiente de validación.
 Las pruebas de USB/pantalla no demuestran un intercambio ni una entrega de regalos por radio.
 
 ## Funcionamiento
@@ -41,7 +41,9 @@ TX cuenta comandos de envío remitidos, no confirmaciones por radio. Las horas s
 desde el arranque, no hora de calendario.
 
 El protocolo USB mantiene sus créditos y cambio de baudrate en el P4; DISPLAY se ejecuta localmente.
-Los demás comandos llegan al C6. Cada registro SDIO contiene versión, tipo, longitud LE y payload.
+Los demás comandos llegan al C6. La app limita esta placa a 460800 baudios, incluso si el ajuste
+general pide 921600 o 1500000; la prueba real a 921600 perdió HELLO. Los demás modelos conservan
+sus velocidades habituales y la búsqueda de puerto reconoce también una sesión dejada a 460800. Cada registro SDIO contiene versión, tipo, longitud LE y payload.
 El C6 mantiene **un único envío SDIO pendiente** hasta que el P4 lo ha leído completo; esto conserva
 la frontera de registros sobre ESSL, cuya API informa de los bytes disponibles. No debe aumentarse
 el número de envíos simultáneos sin añadir un reensamblador de registros en el P4.
@@ -109,7 +111,7 @@ v0.1–v1.x (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`, revisión mínima 0.1). ESP
 esas revisiones de v3.x. Consultar primero `esptool --chip esp32p4 --port PUERTO chip-id`.
 Para una placa con P4 v3.x hay que cambiar la revisión en `idf.py -C firmware/jc8012p4 menuconfig`
 y recompilar; la imagen por defecto no sirve para ambas familias. No se ha confirmado la revisión
-de la placa del usuario. Flash P4: 16 MB; PSRAM a 200 MHz como en la demo publicada.
+de otras unidades. La placa probada tiene revisión v1.3. Flash P4: 16 MB; PSRAM a 200 MHz como en la demo publicada.
 
 Previsualización sin placa ni ESP-IDF (compilador C local; Pillow opcional para PNG):
 
@@ -134,17 +136,43 @@ ESP-Hosted. Eso no expone por sí solo los hooks WPA privados de pokeldn, pero o
 camino para instalar una aplicación de radio que sí los contenga. La firma `00000000` observada
 solo demuestra que el C6 no habla todavía el protocolo PKLD; no demuestra que carezca de OTA.
 
-**Estado:** alternativa documentada por Espressif; todavía no probada en esta unidad. Hay que
-consultar la versión y capacidades del coprocesador con un host ESP-Hosted compatible y comprobar
-las particiones OTA, el espacio y las validaciones de imagen que aplique su firmware. No se debe
-confundir disponer de estas APIs en la biblioteca del P4 con que el C6 instalado las implemente.
-La instalación OTA requiere una aplicación C6 compatible con esas validaciones y un procedimiento
-de recuperación/confirmación de arranque. No basta con añadir el componente esp_hosted al P4.
+**Probado en esta unidad:** el host temporal ESP-Hosted 3.0.9 / esp_wifi_remote 1.6.5
+con ESP-IDF v6.1 consultó el C6 instalado, versión **2.1.10**, y completó OTA_BEGIN,
+705488 bytes de OTA_WRITE y OTA_END con ESP_OK. La nueva aplicación arrancó, publicó la
+firma PKLD y respondió a HELLO/STATUS a través del monitor P4 restaurado.
+No fue necesario cambiar de USB-C ni conectar un adaptador a CN5.
 
-El archivo combinado `pokechanger-c6.bin` contiene bootloader y tabla de particiones y **no** es
-el payload de una OTA de aplicación. La aplicación está en `radio/build/pokechanger_radio.bin`;
-su uso por OTA todavía requiere validar el arranque con el bootloader y particiones del C6 instalado.
-Hasta preparar y verificar esa migración, el procedimiento operativo de este fork sigue siendo UART.
+El instalador por defecto solo consulta el coprocesador. Para habilitar la migración hay
+que compilar con `--ota`; sigue requiriendo una línea INSTALL con el SHA256 exacto de la
+aplicación embebida. Se configura UART0 explícitamente y se descarta la entrada parcial
+del arranque antes de procesar esa línea.
+
+```sh
+python scripts/build_jc8012.py
+python scripts/build_jc8012_installer.py --ota
+python tools/ldn/jc8012_ota.py --port PUERTO_USB_P4 \
+  --installer dist/jc8012p4/pokechanger-installer-ota.bin \
+  --monitor dist/jc8012p4/pokechanger-p4.bin \
+  --c6-app dist/jc8012p4/pokechanger-c6-app.bin \
+  --backup-dir /ruta/local/nueva/copia-migracion
+```
+
+El controlador guarda los sectores P4 afectados, instala el auxiliar, verifica el hash,
+ejecuta la OTA y restaura el monitor P4 incluso si falla. Después exige HELLO, una aplicación
+anterior recuperable y BENCH de 64 KiB sin pérdidas antes de confirmar el C6. El primer arranque
+OTA tiene 120 segundos de prueba y ocho arranques como máximo sin confirmación; conserva la
+aplicación anterior en otra partición. `--leave-trial` deja vencer esa prueba.
+[Detalles del instalador y recuperación](../firmware/jc8012p4/installer/README.md).
+
+La vuelta automática se probó dejando vencer los 120 segundos: el siguiente instalador volvió
+a consultar ESP-Hosted 2.1.10. Se repitió la OTA, pasó BENCH de 64 KiB y se confirmó el arranque;
+tras reiniciar, STATUS mantuvo `ota_pending=0` y la radio siguió respondiendo.
+
+La OTA cambia solamente la aplicación C6; conserva su bootloader y tabla de particiones.
+El combinado `pokechanger-c6.bin`, con bootloader y particiones, sirve para UART, **no para OTA**.
+El payload OTA es `pokechanger-c6-app.bin` (copia de `radio/build/pokechanger_radio.bin`).
+La compatibilidad observada corresponde a esta unidad y su ESP-Hosted 2.1.10; otras versiones
+pueden aplicar validaciones diferentes o carecer de OTA.
 
 ## Primera instalación por UART (vía directa)
 
@@ -190,7 +218,7 @@ Pruebas de registros SDIO (tamaños 0–1600, truncado, versión incompatible, o
 monitor, errores, desconexión, watchdog con rollover, historial acotado, límites del framebuffer y selección de firmware:
 
 ```sh
-python -m pytest tests/test_jc8012p4.py tests/test_esp32_screen.py tests/test_board_flash.py tests/test_esp32.py -q
+python -m pytest tests/test_jc8012p4.py tests/test_esp32_screen.py tests/test_board_flash.py tests/test_esp32.py tests/test_jc8012_ota.py -q
 ```
 
 Validación local del port inicial: ambos firmwares compilados y combinados; 117 pruebas de la
@@ -204,12 +232,24 @@ selección anterior pasaron. Las pruebas nativas se ejecutan con AddressSanitize
 - DISPLAY repetido, rechazo de un DISPLAY malformado, cambio a 460800 baudios y vuelta a 115200 probados.
 - Carga de 20 segundos: 1722 comandos DISPLAY aceptados, cero respuestas fallidas; el contador de
   imágenes avanzó y el P4 reportó cero `p4_wire_bad` y cero `p4_wire_dropped`.
-- SDIO inicializa y lee los registros del C6; la firma leída es 00000000, en lugar de PKLD.
-  El firmware P4 informa `bridge_stage=4 bridge_ready=0` y no inventa una identidad de radio.
-- Una copia local verificada de los primeros 384 KiB (`0x0`–`0x5FFFF`) preserva toda la región
-  alterada al instalar esta imagen; no es una copia de los 16 MB completos.
+- Con el C6 original, SDIO devolvía firma 00000000 y `bridge_stage=4 bridge_ready=0`.
+  Tras la OTA devuelve PKLD (`444c4b50`), `bridge_stage=5 bridge_ready=1` y la identidad P4/C6.
+- Los búferes SDIO del P4 usan RAM interna DMA y alineación de 64 bytes. La alineación inicial
+  de cuatro bytes fallaba al pasar a transferencias por bloques; BENCH de 256, 508, 512, 768,
+  1024 y 1400 bytes pasó después de la corrección, sin pérdidas ni CRC rechazados.
+- BENCH: 65536 bytes a 115200; 134400 bytes a 460800 y otros 134400 a 230400, sin pérdidas
+  ni CRC rechazados. Un comando de 1600 bytes en sentido PC → C6 recibió el rechazo esperado
+  del C6 para un tipo desconocido, verificando también el transporte largo de subida.
+- SNIFF recibió 482, 667 y 680 tramas Wi-Fi reales en los canales 1, 6 y 11, respectivamente.
+  AP_START y STOP pasaron. Esto no demuestra asociación con una Switch ni un intercambio LDN.
+- La recuperación temporizada devolvió ESP-Hosted 2.1.10; la segunda OTA quedó confirmada y
+  persistió tras reiniciar. El usuario confirmó en pantalla la tarjeta «Radio C6 lista».
+- La conexión real con el ajuste general de la app a 921600 usa ahora 460800 automáticamente.
+- La copia local original se amplió antes de cada instalador hasta los primeros 1272 KiB
+  (`0x0`–`0x13DFFF`), cubriendo los sectores P4 alterados. No es una copia de los 16 MB completos.
 - Las lecturas largas de flash fallaron a 921600 y 460800. Para lectura/escritura de flash se usó
-  115200, aunque el intercambio corto de comandos USB a 460800 sí pasó.
+  115200 inicialmente; las últimas copias y escrituras del instalador también pasaron a 230400.
+  Los comandos y BENCH USB de la app a 460800 pasaron; HELLO a 921600 falló.
 
 Repetir la prueba del P4, incluso sin el C6 instalado:
 
@@ -222,11 +262,10 @@ cambio de velocidad. Su resultado de radio queda separado del resultado del P4; 
 `--require-radio` para exigir también HELLO del C6. STATUS incluye `p4_revision`, `psram_bytes`,
 `lcd_frames`, `p4_wire_bad`, `p4_wire_dropped`, `bridge_stage` y `c6_signature`.
 Las fases son 0: inicio; 1: bus SDIO; 2: tarjeta; 3: lectura de firma; 4: firmware C6 incompatible;
-5: radio lista; 6: enlace perdido.
+5: radio lista; 6: enlace perdido. `sdio_error` conserva el error de recepción que causó la fase 6.
+La radio C6 añade `ota_pending` y la dirección `ota_fallback` de la aplicación anterior verificada.
 
-Pendiente: comprobar primero la migración C6 mediante ESP-Hosted OTA por SDIO; si no resulta
-compatible, cargar el firmware por CN5. Después, probar
-HELLO completo y BENCH, estabilidad SDIO bajo tráfico de radio, red LDN y una consola, un intercambio
+Pendiente: estabilidad SDIO bajo tráfico sostenido de radio, red LDN con una consola, un intercambio
 y una entrega real de Mystery Gift. Comprobar además desconexión USB, reinicio conjunto P4/C6
 y cierre de red por watchdog. El touch queda fuera de esta primera versión.
 

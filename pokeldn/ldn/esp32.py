@@ -39,7 +39,7 @@ LINK_PROBE_AFTER = 1.0
 LINK_SILENCE = 3.0
 # The run rates the app's Settings offer (gui/views/settings.py); open_serial looks for a board
 # left at any of them.
-RUN_BAUDS = (921600, 1500000)
+RUN_BAUDS = (921600, 1500000, 460800)
 
 # The LED's patterns (firmware/esp32/main/led.h); "auto" hands the LED back to the radio's state.
 LED_PATTERNS = ("auto", "off", "on", "breathe", "blink", "flash3", "ramp-up", "ramp-down", "pulse")
@@ -323,7 +323,7 @@ class Radio:
     @classmethod
     def open_serial(cls, port: str, baud: int = 115200, fast_baud: int | None = None, log=None,
                     on_lost=None, check_protocol: bool = True, left_at=()):
-        """`fast_baud` defaults to POKELDN_ESP32_BAUD, else 921600; 0 keeps the rate the board
+        """`fast_baud` defaults to POKELDN_ESP32_BAUD, else 921600 (JC8012 caps at 460800); 0 keeps the rate the board
         answers at. `left_at`: more rates an earlier process may have left the board at.
         `radio.info` is the board's HELLO reply."""
         run_baud = int(os.environ.get("POKELDN_ESP32_BAUD", "921600"))
@@ -357,6 +357,12 @@ class Radio:
             # A classic board keeps the last run's BAUD until it resets, and opening the port does
             # not reset it. docs/hardware_esp32.md, Running.
             info = radio._find_rate([baud, fast_baud, run_baud, *RUN_BAUDS, *left_at])
+            # This board's CH340/P4 UART link was verified at 460800; 921600 lost HELLO.
+            # Apply the board limit also to the desktop app's general baud setting.
+            if fast_baud and fast_baud > 460800 and "board=JC8012P4A1C_I_W_Y" in info.text.split():
+                fast_baud = 460800
+                if log:
+                    log("[esp32] JC8012 USB bridge: using 460800 baud")
             if log and s.baudrate != baud:
                 log(f"[esp32] the board answered at {s.baudrate} baud")
             if fast_baud and fast_baud != s.baudrate:
