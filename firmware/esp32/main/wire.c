@@ -363,8 +363,14 @@ static void reader(void *arg)
     };
     ESP_ERROR_CHECK(uart_driver_install(WIRE_UART, 16384, 16384, WIRE_UART_EVENTS, &s_uart_events, 0));
     ESP_ERROR_CHECK(uart_param_config(WIRE_UART, &config));
-    /* With CONFIG_ESP_CONSOLE_NONE nothing routes UART0 to GPIO1/3; the board stays mute without this. */
-    ESP_ERROR_CHECK(uart_set_pin(WIRE_UART, 1, 3, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    /* With CONFIG_ESP_CONSOLE_NONE route UART0 explicitly to the board's USB bridge. */
+    ESP_ERROR_CHECK(uart_set_pin(WIRE_UART,
+#if CONFIG_IDF_TARGET_ESP32P4
+                                 37, 38, /* JC8012: CH340C to UART0 */
+#else
+                                 1, 3,
+#endif
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     /* The driver drains the 128-byte FIFO at 120 by default: 8 bytes, 53 us at 1500000, and a
        Scarlet seat's opening overflowed it 235 times. At 32 the margin is 640 us.
        docs/hardware_esp32.md, The serial ceiling. */

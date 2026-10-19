@@ -811,7 +811,7 @@ static void command(uint8_t type, const uint8_t *p, size_t n)
     }
 }
 
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 && !POKELDN_JC8012_C6
 /* XIAO ESP32C6: GPIO3 low powers the RF switch, GPIO14 low picks the ceramic antenna and high the
    U.FL socket (Seeed's board guide). docs/hardware_esp32.md, Supported boards. */
 static void rf_switch_on(void)
@@ -825,7 +825,7 @@ static void rf_switch_on(void)
 
 void app_main(void)
 {
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 && !POKELDN_JC8012_C6
     rf_switch_on();
 #endif
     esp_err_t r = nvs_flash_init();

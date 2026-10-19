@@ -71,7 +71,7 @@ FIRMWARES = (
              tr('board.a_controller_for_the_switch_889ffc', 'a controller for the Switch')),
 )
 FIRMWARE_BY_KIND = {f.kind: f for f in FIRMWARES}
-CHIP_NAMES = {"esp32": "ESP32", "esp32s3": "ESP32-S3", "esp32c3": "ESP32-C3", "esp32c6": "ESP32-C6"}
+CHIP_NAMES = {"esp32": "ESP32", "esp32s3": "ESP32-S3", "esp32c3": "ESP32-C3", "esp32c6": "ESP32-C6", "esp32p4": "ESP32-P4"}
 
 
 def image_for(kind: str, chip: str) -> str:
@@ -378,6 +378,11 @@ def flash(port: str, firmware: str = "", kind: str = "radio", from_loader: bool 
     from esptool.bin_image import LoadFirmwareImage
 
     with _connect(port, kind, from_loader) as chip:
+        if chip.CHIP_NAME == "ESP32-P4":
+            raise esptool.FatalError(
+                "JC8012 P4/C6 requires the two firmware projects in firmware/jc8012p4. "
+                "Flash the P4 over USB and the C6 through CN5 with ESP-IDF; "
+                "the stock radio images do not support this board.")
         if chip.CHIP_NAME not in ("ESP32", "ESP32-S3", "ESP32-C3", "ESP32-C6"):
             raise esptool.FatalError(tr('board.is_not_supported_use_an_esp32_esp32_s3_esp32_c3_or_esp3_9f0b35', '{value0} is not supported. Use an ESP32, ESP32-S3, ESP32-C3 or ESP32-C6.', value0=chip.CHIP_NAME))
         if kind == "pad" and chip.CHIP_NAME not in ("ESP32-S3", "ESP32"):

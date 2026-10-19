@@ -1,0 +1,29 @@
+name: JC8012 firmware
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - firmware/jc8012p4/**
+      - firmware/esp32/main/**
+      - scripts/build_jc8012.py
+      - .github/workflows/jc8012.yml
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile P4 and C6 and merge both images
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          python scripts/build_jc8012.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jc8012-firmware-experimental
+          path: |
+            dist/jc8012p4/pokechanger-*.bin
+            dist/jc8012p4/manifest.json
+            dist/jc8012p4/SHA256SUMS
