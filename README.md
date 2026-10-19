@@ -3,7 +3,8 @@
 Adaptación de pokeldn para usar el ESP32-C6 integrado como radio LDN, el ESP32-P4 como
 puente USB y la pantalla de 10,1 pulgadas como monitor de eventos de la app.
 **Experimental: USB y pantalla probados en la placa real; radio C6 y Switch pendientes.**
-Requiere cargar firmware en los dos chips, incluido el C6 por CN5.
+Requiere firmware específico en los dos chips. Para el C6, CN5 es la vía directa;
+la alternativa OTA por SDIO depende del firmware ESP-Hosted que tenga instalado y está pendiente de comprobar.
 
 [Hardware, compilación e instalación](docs/hardware_jc8012p4.md) ·
 [Fork original](https://github.com/Decryptu/pokeldn)

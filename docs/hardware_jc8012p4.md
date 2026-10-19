@@ -121,7 +121,32 @@ Renderiza un ejemplo de regalo con el mismo `dashboard.c` y `scene.c` del firmwa
 `dist/jc8012p4/preview.ppm`. Si está instalado Pillow, crea también `preview.png`.
 Es una simulación del contenido de pantalla, no una captura de la placa.
 
-## Primera instalación
+## Alternativa sin adaptador: ESP-Hosted Transport OTA
+
+Espressif documenta la [actualización del coprocesador a través del host](https://components.espressif.com/components/espressif/esp_hosted/versions/2.9.7/examples/host_performs_slave_ota?language=en).
+El P4 puede enviar una aplicación nueva al C6 por el propio SDIO, sin UART externo ni conexión
+a una red Wi-Fi: el archivo puede estar en la flash del P4. Por tanto, **CN5 no es necesariamente
+la única forma de instalar la radio**. La afirmación inicial de que un adaptador era obligatorio
+no había considerado esta vía.
+
+Que el firmware anterior pudiera configurar una red Wi-Fi es coherente con el uso del C6 mediante
+ESP-Hosted. Eso no expone por sí solo los hooks WPA privados de pokeldn, pero ofrece un posible
+camino para instalar una aplicación de radio que sí los contenga. La firma `00000000` observada
+solo demuestra que el C6 no habla todavía el protocolo PKLD; no demuestra que carezca de OTA.
+
+**Estado:** alternativa documentada por Espressif; todavía no probada en esta unidad. Hay que
+consultar la versión y capacidades del coprocesador con un host ESP-Hosted compatible y comprobar
+las particiones OTA, el espacio y las validaciones de imagen que aplique su firmware. No se debe
+confundir disponer de estas APIs en la biblioteca del P4 con que el C6 instalado las implemente.
+La instalación OTA requiere una aplicación C6 compatible con esas validaciones y un procedimiento
+de recuperación/confirmación de arranque. No basta con añadir el componente esp_hosted al P4.
+
+El archivo combinado `pokechanger-c6.bin` contiene bootloader y tabla de particiones y **no** es
+el payload de una OTA de aplicación. La aplicación está en `radio/build/pokechanger_radio.bin`;
+su uso por OTA todavía requiere validar el arranque con el bootloader y particiones del C6 instalado.
+Hasta preparar y verificar esa migración, el procedimiento operativo de este fork sigue siendo UART.
+
+## Primera instalación por UART (vía directa)
 
 1. Comprobar la revisión del P4, la placa y el pinout de CN5 contra los esquemas.
 2. Cargar el C6 por su cabecera **CN5** usando un adaptador UART de lógica **3,3 V**.
@@ -199,7 +224,8 @@ cambio de velocidad. Su resultado de radio queda separado del resultado del P4; 
 Las fases son 0: inicio; 1: bus SDIO; 2: tarjeta; 3: lectura de firma; 4: firmware C6 incompatible;
 5: radio lista; 6: enlace perdido.
 
-Pendiente: cargar el firmware C6 por CN5 (el usuario aún no dispone de adaptador UART), probar
+Pendiente: comprobar primero la migración C6 mediante ESP-Hosted OTA por SDIO; si no resulta
+compatible, cargar el firmware por CN5. Después, probar
 HELLO completo y BENCH, estabilidad SDIO bajo tráfico de radio, red LDN y una consola, un intercambio
 y una entrega real de Mystery Gift. Comprobar además desconexión USB, reinicio conjunto P4/C6
 y cierre de red por watchdog. El touch queda fuera de esta primera versión.
