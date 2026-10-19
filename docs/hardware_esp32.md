@@ -15,7 +15,7 @@ host. `pokeldn.ldn.esp32_wlan` gives the LDN library a factory backed by the boa
 
 The JC8012P4A1C_I_W_Y has a separate P4 USB/display processor and C6 radio. Use the
 [two-chip port and installation guide](hardware_jc8012p4.md), not the generic C6 image.
-Both images compile; hardware communication has not yet been verified.
+Both images compile. P4 USB and the display have been tested on hardware; C6 radio and Switch communication remain unverified.
 
 ## Supported boards
 

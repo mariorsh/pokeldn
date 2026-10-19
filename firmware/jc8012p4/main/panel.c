@@ -4,6 +4,7 @@
 #include "screen.h"
 #include "dashboard.h"
 #include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -23,7 +24,9 @@
 static SemaphoreHandle_t s_lock;
 static jc_events_t s_events;
 static esp_lcd_panel_handle_t s_panel;
-static uint16_t *s_canvas;
+static uint16_t *s_buffers[2];
+static SemaphoreHandle_t s_frame_done;
+static atomic_uint s_frames;
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 void jc_panel_note(const char *text)
@@ -50,9 +53,18 @@ bool jc_panel_display(const uint8_t *p, size_t n)
     xSemaphoreGive(s_lock);
     return ok;
 }
+static bool IRAM_ATTR frame_done(esp_lcd_panel_handle_t panel,
+                                 esp_lcd_dpi_panel_event_data_t *event, void *arg)
+{
+    BaseType_t wake = pdFALSE;
+    xSemaphoreGiveFromISR(s_frame_done, &wake);
+    return wake == pdTRUE;
+}
+unsigned jc_panel_frames(void) { return atomic_load(&s_frames); }
 static void display_task(void *arg)
 {
     uint8_t frame[SCREEN_BYTES];
+    unsigned back = 1;
     for (;;) {
         jc_events_t snapshot;
         xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -60,8 +72,15 @@ static void display_task(void *arg)
         const uint8_t power = scene_draw(frame, &s_events.radio, now_ms());
         snapshot = s_events;
         xSemaphoreGive(s_lock);
-        jc_dashboard_render(s_canvas, &snapshot, frame);
-        ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(s_panel, 0, 0, WIDTH, HEIGHT, s_canvas));
+        jc_dashboard_render(s_buffers[back], &snapshot, frame);
+        while (xSemaphoreTake(s_frame_done, 0) == pdTRUE) {}
+        ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(s_panel, 0, 0, WIDTH, HEIGHT, s_buffers[back]));
+        /* The first completion can race the buffer selection; the next one
+         * guarantees DMA has switched. Only then may we render into the old buffer. */
+        configASSERT(xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(1000)) == pdTRUE);
+        configASSERT(xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(1000)) == pdTRUE);
+        back ^= 1;
+        atomic_fetch_add(&s_frames, 1);
         /* No touch interactions are required for a passive monitor. BOOT wakes the scene. */
         if (gpio_get_level(GPIO_NUM_35) == 0) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -82,8 +101,8 @@ void jc_panel_start(void)
     jc_events_init(&s_events);
     scene_panel(PANEL_128X64);
     scene_reset();
-    s_canvas = heap_caps_malloc(WIDTH * HEIGHT * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    configASSERT(s_canvas);
+    s_frame_done = xSemaphoreCreateBinary();
+    configASSERT(s_frame_done);
     const gpio_config_t button = {.pin_bit_mask = 1ULL << 35, .mode = GPIO_MODE_INPUT,
                                  .pull_up_en = GPIO_PULLUP_ENABLE};
     ESP_ERROR_CHECK(gpio_config(&button));
@@ -103,8 +122,8 @@ void jc_panel_start(void)
     const esp_lcd_dbi_io_config_t dbi = JD9365_PANEL_IO_DBI_CONFIG();
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(bus, &dbi, &io));
     const esp_lcd_dpi_panel_config_t dpi = {
-        .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT, .dpi_clock_freq_mhz = 63,
-        .virtual_channel = 0, .in_color_format = LCD_COLOR_FMT_RGB565, .num_fbs = 1,
+        .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT, .dpi_clock_freq_mhz = 48,
+        .virtual_channel = 0, .in_color_format = LCD_COLOR_FMT_RGB565, .num_fbs = 2,
         .video_timing = {.h_size = WIDTH, .v_size = HEIGHT, .hsync_back_porch = 20,
             .hsync_pulse_width = 20, .hsync_front_porch = 40, .vsync_back_porch = 8,
             .vsync_pulse_width = 4, .vsync_front_porch = 20},
@@ -115,6 +134,11 @@ void jc_panel_start(void)
     const esp_lcd_panel_dev_config_t panel = {.reset_gpio_num = GPIO_NUM_27,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB, .bits_per_pixel = 16, .vendor_config = &vendor};
     ESP_ERROR_CHECK(esp_lcd_new_panel_jd9365(io, &panel, &s_panel));
+    void *fb0, *fb1;
+    ESP_ERROR_CHECK(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2, &fb0, &fb1));
+    s_buffers[0] = fb0; s_buffers[1] = fb1;
+    const esp_lcd_dpi_panel_event_callbacks_t callbacks = {.on_frame_buf_complete = frame_done};
+    ESP_ERROR_CHECK(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, NULL));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
     configASSERT(xTaskCreatePinnedToCore(display_task, "panel", 8192, NULL, 1, NULL, 0) == pdPASS);

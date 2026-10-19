@@ -8,9 +8,10 @@ nav_order: 3
 
 Adaptación experimental de [Decryptu/pokeldn](https://github.com/Decryptu/pokeldn) para usar
 la placa como comunicador USB con la Switch y mostrar los eventos en su pantalla de 10,1 pulgadas.
-**Ambos firmwares compilan con ESP-IDF v6.1. Falta validación en una placa y una Switch reales.**
-No hay un dispositivo conectado durante el desarrollo inicial. La compilación y las pruebas de
-protocolo no demuestran todavía un intercambio o una entrega de regalos por radio.
+**Ambos firmwares compilan con ESP-IDF v6.1. USB y pantalla ya se han probado en una placa real.**
+La radio C6 y la comunicación con una Switch siguen pendientes de validación: el C6 de la unidad
+probada responde a SDIO, pero todavía no contiene el firmware de radio de esta adaptación.
+Las pruebas de USB/pantalla no demuestran un intercambio ni una entrega de regalos por radio.
 
 ## Funcionamiento
 
@@ -55,7 +56,8 @@ El C6 conserva el watchdog de la app: ALIVE cada segundo y cierre de red tras ci
 Fuentes consultadas: [esquemas y demo de la placa](https://github.com/wegi1/ESP32P4-JC8012P4A1C-I_W_Y/tree/0c1bbcfdbaa87bbc4686cde98b7deb556711064d),
 [SDIO de ESP-IDF](https://github.com/espressif/esp-idf/tree/v6.1/examples/peripherals/sdio)
 y [controlador JD9365 de Espressif](https://components.espressif.com/components/espressif/esp_lcd_jd9365/versions/2.0.2).
-La correspondencia se ha comprobado en los esquemas; no se han medido señales en hardware.
+La correspondencia se ha comprobado en los esquemas. Se ha observado comunicación UART/SDIO
+y una imagen correcta en la unidad probada, sin medir señales con osciloscopio.
 
 | Señal | GPIO P4 | GPIO C6 |
 |---|---:|---:|
@@ -74,12 +76,16 @@ La correspondencia se ha comprobado en los esquemas; no se han medido señales e
 
 La pantalla es JD9365, MIPI-DSI de dos carriles, RGB565, 800 × 1280 en orientación vertical.
 El driver usa LDO3 a 2500 mV y los registros y timings de la demo publicada: reloj de píxel
-63 MHz, H 20/20/40 y V 8/4/20 (back porch / pulse / front porch).
+48 MHz, H 20/20/40 y V 8/4/20 (back porch / pulse / front porch). La demo utiliza 63 MHz;
+se ha reducido a 48 MHz durante la prueba real para dar margen al acceso a PSRAM.
 `main/panel_registers.h` transcribe los valores de inicialización de esa demo.
 El lector táctil GSL3680 queda pendiente; el monitor actual no requiere interacción táctil.
 BOOT despierta la escena y la retroiluminación baja tras un minuto sin actividad y se apaga tras diez.
-El primer renderer usa un framebuffer de scanout y otro canvas en PSRAM; puede haber tearing,
-pendiente de medir en la pantalla real. No se ha añadido una dependencia de LVGL.
+El renderer dibuja en dos framebuffers de scanout en PSRAM y cambia de búfer al finalizar
+las transferencias, sin copiar un canvas adicional. Espera dos finalizaciones por cambio para
+cubrir la carrera entre la selección del búfer y el ISR. Se habilita ejecución de código y rodata
+desde PSRAM (XIP). La primera prueba con 63 MHz, copia por CPU y sin XIP mostró azul uniforme;
+la combinación actual mostró el monitor y la tarjeta de prueba correctamente. No se ha añadido LVGL.
 
 ## Compilar
 
@@ -165,10 +171,38 @@ python -m pytest tests/test_jc8012p4.py tests/test_esp32_screen.py tests/test_bo
 Validación local del port inicial: ambos firmwares compilados y combinados; 117 pruebas de la
 selección anterior pasaron. Las pruebas nativas se ejecutan con AddressSanitizer y UBSan.
 
-Pendiente en hardware: enumeración CH340, HELLO/BAUD y BENCH sin pérdidas, estabilidad del bus
-SDIO bajo carga, encendido y colores del panel, red LDN y conexión de una consola, un intercambio y
-una entrega real de Mystery Gift en un juego compatible. Comprobar también desconexión USB,
-reinicio conjunto P4/C6 y el cierre de red del watchdog. El touch queda fuera de esta primera versión.
+### Prueba de placa real — 19 de octubre de 2026
+
+- P4 revisión v1.3, flash de 16 MB y PSRAM de 32 MB detectados.
+- Imagen P4 cargada y verificada mediante hash por esptool.
+- Monitor y tarjeta «Prueba USB» confirmados visualmente por el usuario después de corregir el azul uniforme.
+- DISPLAY repetido, rechazo de un DISPLAY malformado, cambio a 460800 baudios y vuelta a 115200 probados.
+- Carga de 20 segundos: 1722 comandos DISPLAY aceptados, cero respuestas fallidas; el contador de
+  imágenes avanzó y el P4 reportó cero `p4_wire_bad` y cero `p4_wire_dropped`.
+- SDIO inicializa y lee los registros del C6; la firma leída es 00000000, en lugar de PKLD.
+  El firmware P4 informa `bridge_stage=4 bridge_ready=0` y no inventa una identidad de radio.
+- Una copia local verificada de los primeros 384 KiB (`0x0`–`0x5FFFF`) preserva toda la región
+  alterada al instalar esta imagen; no es una copia de los 16 MB completos.
+- Las lecturas largas de flash fallaron a 921600 y 460800. Para lectura/escritura de flash se usó
+  115200, aunque el intercambio corto de comandos USB a 460800 sí pasó.
+
+Repetir la prueba del P4, incluso sin el C6 instalado:
+
+```sh
+python tools/ldn/jc8012_probe.py --port PUERTO_USB_P4 --duration 20 --output /ruta/local/probe.json
+```
+
+El script espera a STATUS tras un posible reset del CH340, envía comandos de pantalla y prueba el
+cambio de velocidad. Su resultado de radio queda separado del resultado del P4; añadir
+`--require-radio` para exigir también HELLO del C6. STATUS incluye `p4_revision`, `psram_bytes`,
+`lcd_frames`, `p4_wire_bad`, `p4_wire_dropped`, `bridge_stage` y `c6_signature`.
+Las fases son 0: inicio; 1: bus SDIO; 2: tarjeta; 3: lectura de firma; 4: firmware C6 incompatible;
+5: radio lista; 6: enlace perdido.
+
+Pendiente: cargar el firmware C6 por CN5 (el usuario aún no dispone de adaptador UART), probar
+HELLO completo y BENCH, estabilidad SDIO bajo tráfico de radio, red LDN y una consola, un intercambio
+y una entrega real de Mystery Gift. Comprobar además desconexión USB, reinicio conjunto P4/C6
+y cierre de red por watchdog. El touch queda fuera de esta primera versión.
 
 La licencia AGPL-3.0 y los créditos del upstream se conservan. La documentación original continúa
 aplicándose a los juegos y a la app.

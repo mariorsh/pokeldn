@@ -6,6 +6,9 @@
 #include "driver/sdmmc_host.h"
 #include "esp_serial_slave_link/essl_sdio.h"
 #include "esp_timer.h"
+#include "esp_chip_info.h"
+#include "esp_psram.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -17,6 +20,7 @@
 static essl_handle_t s_link;
 static SemaphoreHandle_t s_bus;
 static atomic_bool s_ready;
+static atomic_uint s_stage, s_signature;
 static sdmmc_card_t s_card;
 
 static void result(uint8_t type, esp_err_t error)
@@ -26,9 +30,28 @@ static void result(uint8_t type, esp_err_t error)
     jc_panel_message(true, 0x82, p, sizeof(p));
     wire_send(0x82, p, sizeof(p), NULL, 0);
 }
+/* A STATUS reply is available even with factory C6 firmware. It confirms that
+ * the P4 passed PSRAM/panel initialization without inventing a radio identity. */
+static void panel_status(const uint8_t *radio, size_t length)
+{
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    char text[1280];
+    int n = snprintf(text, sizeof(text),
+        "%.*s bridge=jc8012p4 bridge_ready=%u bridge_stage=%u c6_signature=%08x "
+        "p4_revision=%u psram_bytes=%u p4_heap=%u p4_wire_dropped=%u p4_wire_bad=%u lcd_frames=%u",
+        (int)length, radio ? (const char *)radio : "", (unsigned)atomic_load(&s_ready),
+        atomic_load(&s_stage), atomic_load(&s_signature), (unsigned)chip.revision,
+        (unsigned)esp_psram_get_size(), (unsigned)esp_get_free_heap_size(), (unsigned)wire_dropped(), (unsigned)wire_rx_bad(), jc_panel_frames());
+    if (n > 0) wire_send(0x89, text, (size_t)n < sizeof(text) ? n : sizeof(text) - 1, NULL, 0);
+}
 static void command(uint8_t type, const uint8_t *p, size_t n)
 {
     if (type == 0x01) wire_credit_reset();
+    if (type == 0x0b && !atomic_load(&s_ready)) {
+        panel_status(NULL, 0);
+        return;
+    }
     if (type == 0x02) {
         if (n != 4) { result(type, ESP_ERR_INVALID_ARG); return; }
         uint32_t baud;
@@ -79,11 +102,13 @@ static void receive(void *arg)
                      * Numeric protocol capability version keeps upstream ALIVE support enabled. */
                     const char text[] = "pokeldn-radio esp32p4 version=1.6.3 board=JC8012P4A1C_I_W_Y radio=esp32c6";
                     wire_send(type, p, 14, text, sizeof(text) - 1);
-                } else if (type != 0x8b) wire_send(type, p, n, NULL, 0);
+                } else if (type == 0x89) panel_status(p, n);
+                else if (type != 0x8b) wire_send(type, p, n, NULL, 0);
             } else jc_panel_note("Paquete SDIO invalido");
         } else if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NOT_FOUND) {
             /* Do not forward fragments or spin on a broken bus. Requires reset of both chips. */
             atomic_store(&s_ready, false);
+            atomic_store(&s_stage, 6);
             jc_panel_message(true, 0xff, NULL, 0);
             jc_panel_note("Enlace SDIO perdido: reinicia placa");
             vTaskDelete(NULL);
@@ -114,24 +139,32 @@ void app_main(void)
     slot.clk = GPIO_NUM_18; slot.cmd = GPIO_NUM_19;
     slot.d0 = GPIO_NUM_14; slot.d1 = GPIO_NUM_15;
     slot.d2 = GPIO_NUM_16; slot.d3 = GPIO_NUM_17;
+    atomic_store(&s_stage, 1);
     ESP_ERROR_CHECK(sdmmc_host_init());
     ESP_ERROR_CHECK(sdmmc_host_init_slot(host.slot, &slot));
     while (sdmmc_card_init(&host, &s_card) != ESP_OK) {
         jc_panel_note("C6 sin respuesta: comprobar firmware");
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
+    atomic_store(&s_stage, 2);
     essl_sdio_config_t cfg = {.card = &s_card, .recv_buffer_size = JC_SDIO_BUFFER};
     ESP_ERROR_CHECK(essl_sdio_init_dev(&s_link, &cfg));
     ESP_ERROR_CHECK(essl_init(s_link, 2000));
     ESP_ERROR_CHECK(essl_wait_for_ready(s_link, 2000));
+    atomic_store(&s_stage, 3);
+    bool signature_matches = true;
     for (int i = 0; i < 4; ++i) {
         uint8_t value;
         ESP_ERROR_CHECK(essl_read_reg(s_link, i, &value, 1000));
-        if (value != JC_SDIO_MAGIC[i]) {
-            jc_panel_note("C6 incompatible: cargar radio JC8012");
-            return;
-        }
+        atomic_fetch_or(&s_signature, (uint32_t)value << (i * 8));
+        if (value != JC_SDIO_MAGIC[i]) signature_matches = false;
     }
+    if (!signature_matches) {
+        atomic_store(&s_stage, 4);
+        jc_panel_note("C6 incompatible: cargar radio JC8012");
+        return;
+    }
+    atomic_store(&s_stage, 5);
     atomic_store(&s_ready, true);
     jc_panel_note("SDIO conectado a la radio C6");
     configASSERT(xTaskCreate(receive, "c6_events", 6144, NULL, 18, NULL) == pdPASS);
