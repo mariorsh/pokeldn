@@ -38,7 +38,8 @@ void jc_dashboard_render(uint16_t *pixels, const jc_events_t *s, const uint8_t *
     text(pixels, 36, 107, "JC8012 / P4 + C6", 3, MUTED);
     box(pixels, 32, 167, 736, 111, CARD);
     text(pixels, 54, 186, s->ready ? "RADIO C6 LISTA" : "ESPERANDO RADIO C6", 3, s->ready ? ACCENT : WARN);
-    text(pixels, 54, 229, s->host ? "USB: APP CONECTADA" : "USB: ESPERANDO APP", 3, MUTED);
+    text(pixels, 54, 229, s->bluetooth ? (s->host ? "BLE: APP CONECTADA" : "BLE: ESPERANDO APP") :
+         (s->host ? "USB: APP CONECTADA" : "USB: ESPERANDO APP"), 3, MUTED);
     box(pixels, 32, 298, 736, 360, CARD);
     for (int y = 0; y < SCREEN_H; ++y)
         for (int x = 0; x < SCREEN_W; ++x)
@@ -58,5 +59,5 @@ void jc_dashboard_render(uint16_t *pixels, const jc_events_t *s, const uint8_t *
         text(pixels, 36, y, line, 2, MUTED);
         text(pixels, 128, y, e->text, 2, i == 0 ? ACCENT : INK);
     }
-    text(pixels, 36, 1229, "APP USB > P4 > SDIO > C6 > SWITCH", 2, MUTED);
+    text(pixels, 36, 1229, s->bluetooth ? "APP IOS > BLE > C6 > SWITCH" : "APP USB > P4 > SDIO > C6 > SWITCH", 2, MUTED);
 }

@@ -22,7 +22,7 @@ def preview(folder):
     if not cc:
         raise SystemExit("The software preview needs a host C compiler (cc).")
     binary = folder / "preview-renderer"
-    run(cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", BOARD / "main",
+    run(cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", BOARD / "main", "-I", BOARD / "common",
         "-I", ROOT / "firmware/esp32/main", ROOT / "tools/ldn/jc8012_preview.c",
         BOARD / "main/dashboard.c", BOARD / "main/events.c",
         ROOT / "firmware/esp32/main/screen.c", ROOT / "firmware/esp32/main/scene.c", "-o", binary)

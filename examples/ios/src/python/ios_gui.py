@@ -110,7 +110,16 @@ def selftest():
             rtt = (time.monotonic() - start) / n * 1000
             status = r.request(esp32.CMD_STATUS, b"", esp32.MSG_STATUS, timeout=3).decode(errors="replace")
             interval = next((w for w in status.split() if w.startswith("ble_itvl_us=")), "")
-            return f"{r.info.text}; HELLO round trip {rtt:.1f} ms; {interval}"
+            board_check = ""
+            if "board=JC8012P4A1C_I_W_Y" in r.info.text.split():
+                r.request(esp32.CMD_DISPLAY,
+                          esp32.display_show_payload("gift", 0, "iPhone conectado", "Bluetooth + pantalla"),
+                          esp32.MSG_RESULT, timeout=3)
+                bench = r.bench(16384, 512, timeout=15)
+                if bench["bytes"] != 16384 or bench["missing"] or bench["rejected"]:
+                    raise RuntimeError(f"JC8012 BLE data test failed: {bench}")
+                board_check = "; P4 DISPLAY acknowledged; BLE 16384 bytes, no missing or rejected frames"
+            return f"{r.info.text}; HELLO round trip {rtt:.1f} ms; {interval}{board_check}"
         finally:
             r.close()
 

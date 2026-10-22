@@ -33,6 +33,17 @@ interface and the self-test run; the simulator has no Bluetooth, so no run reach
 `pokeldn.ldn.esp32` opens a `socket://` port with pyserial's `serial_for_url`; the wire is the same COBS
 stream as over USB, with no line rate.
 
+## JC8012 P4/C6 board
+
+Use the fork's paired [P4/C6 firmware](../../docs/hardware_jc8012p4.md), which keeps the P4 event
+monitor and routes the iPhone's DISPLAY commands to it. Power the board over USB and allow
+Bluetooth on the iPhone. Close the iPhone app before using the Mac's USB radio session.
+Do not flash a generic C6 image over the P4 programming port.
+
+On an iPhone 16 Pro Max (iOS 27.0.1), the device build passed AES, zstd, PKHeX, 200 HELLO round
+trips (32 ms average), a P4 DISPLAY acknowledgement and a 16 KiB BLE transfer without loss.
+A real trade from iOS is still pending. For this board, `--selftest` adds the DISPLAY and data tests.
+
 ## Build
 
 Needs Xcode, `gh` (to fetch BeeWare's Python-Apple-support `3.13-b16` into `support/` once) and the

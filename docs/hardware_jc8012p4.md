@@ -10,8 +10,9 @@ Adaptación experimental de [Decryptu/pokeldn](https://github.com/Decryptu/pokel
 la placa como comunicador USB con la Switch y mostrar los eventos en su pantalla de 10,1 pulgadas.
 **Ambos firmwares compilan con ESP-IDF v6.1. USB y pantalla ya se han probado en una placa real.**
 La radio C6 ya se ha instalado mediante OTA por SDIO sin adaptador externo y responde a HELLO,
-BENCH, SNIFF y AP_START. La comunicación LDN con una Switch sigue pendiente de validación.
-Las pruebas de USB/pantalla no demuestran un intercambio ni una entrega de regalos por radio.
+BENCH, SNIFF y AP_START. El 22 de octubre de 2026 se completó un intercambio FireRed/LeafGreen
+desde la app del Mac por USB. En iPhone se verificaron Bluetooth y pantalla; el intercambio iOS
+y la entrega real de regalos siguen pendientes.
 
 ## Funcionamiento
 
@@ -174,6 +175,33 @@ El payload OTA es `pokechanger-c6-app.bin` (copia de `radio/build/pokechanger_ra
 La compatibilidad observada corresponde a esta unidad y su ESP-Hosted 2.1.10; otras versiones
 pueden aplicar validaciones diferentes o carecer de OTA.
 
+## iPhone por Bluetooth
+
+La radio C6 incluye el mismo transporte BLE de pokeldn: servicio `POKELDN-RADIO`,
+COBS, CRC y créditos. El iPhone ejecuta la app completa y el C6 mantiene el enlace Wi-Fi con
+la Switch. La placa necesita alimentación USB; el cable no transporta los datos del iPhone.
+Instalar la [app iOS](../examples/ios/README.md), permitir Bluetooth y configurar las claves
+propias de la consola en la carpeta local de la app.
+
+El P4 conserva el monitor: muestra BLE como transporte, observa los comandos de radio y
+recibe las escenas DISPLAY por SDIO. Cada DISPLAY devuelve al iPhone la confirmación del P4.
+Los paquetes masivos no se duplican en la pantalla. Solo puede controlar la radio un host a la vez:
+con Bluetooth conectado, los comandos USB de radio se rechazan. Al cambiar de transporte se
+cierra la sesión anterior. Para volver al Mac, cerrar la app del iPhone y reconectar por USB.
+
+Verificado el 22 de octubre de 2026 en iPhone 16 Pro Max con iOS 27.0.1:
+
+- App compilada, firmada e instalada; claves locales copiadas con autorización del propietario.
+- AES y zstd correctos; PKHeX cargó las 386 especies de FRLG.
+- 200 HELLO por BLE, media de 32,0 ms e intervalo BLE de 15 ms.
+- Tarjeta «iPhone conectado» confirmada por el P4 y BENCH de 16384 bytes sin pérdidas ni rechazos.
+- Nueva radio C6 confirmada tras BENCH USB de 65536 bytes sin pérdidas.
+
+El intercambio desde iOS se probará después; estas comprobaciones no lo dan por completado.
+El C6 publica SDIO antes de inicializar Bluetooth y el P4 espera hasta diez segundos por la
+firma PKLD al arrancar. Para instalar esta versión se amplió la copia local del P4 a los primeros
+`0x19e000` bytes; se conserva también la aplicación anterior del C6 para recuperación OTA.
+
 ## Primera instalación por UART (vía directa)
 
 1. Comprobar la revisión del P4, la placa y el pinout de CN5 contra los esquemas.
@@ -265,7 +293,7 @@ Las fases son 0: inicio; 1: bus SDIO; 2: tarjeta; 3: lectura de firma; 4: firmwa
 5: radio lista; 6: enlace perdido. `sdio_error` conserva el error de recepción que causó la fase 6.
 La radio C6 añade `ota_pending` y la dirección `ota_fallback` de la aplicación anterior verificada.
 
-Pendiente: estabilidad SDIO bajo tráfico sostenido de radio, red LDN con una consola, un intercambio
+Pendiente: estabilidad prolongada bajo tráfico de radio, intercambio desde iOS
 y una entrega real de Mystery Gift. Comprobar además desconexión USB, reinicio conjunto P4/C6
 y cierre de red por watchdog. El touch queda fuera de esta primera versión.
 

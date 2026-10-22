@@ -71,6 +71,19 @@ static void events(void)
     jc_events_command(&state, 0x04, secret, sizeof(secret), 0);
     for (unsigned i = 0; i < state.count; ++i)
         assert(!strstr(state.events[i].text, "sensitive"));
+    uint8_t bluetooth = 1;
+    jc_events_radio(&state, JC_MSG_HOST_TRANSPORT, &bluetooth, 1, 10);
+    assert(state.bluetooth && !state.host && state.radio.mode == SCENE_IDLE);
+    jc_events_command(&state, 0x01, NULL, 0, 11);
+    assert(state.host && strstr(state.events[(state.next + JC_EVENTS - 1) % JC_EVENTS].text, "Bluetooth"));
+    jc_events_command(&state, 0x06, channel, 1, 12);
+    jc_events_radio(&state, 0x82, ok, sizeof(ok), 13);
+    assert(state.radio.mode == SCENE_HOSTING);
+    bluetooth = 0;
+    jc_events_radio(&state, JC_MSG_HOST_TRANSPORT, &bluetooth, 1, 14);
+    assert(!state.bluetooth && !state.host && !state.pending && state.radio.mode == SCENE_IDLE);
+    jc_events_command(&state, 0x01, NULL, 0, 15);
+    assert(state.host && strstr(state.events[(state.next + JC_EVENTS - 1) % JC_EVENTS].text, "USB"));
 }
 static void render_bounds(void)
 {

@@ -2,9 +2,10 @@
 
 Adaptación de pokeldn para usar el ESP32-C6 integrado como radio LDN, el ESP32-P4 como
 puente USB y la pantalla de 10,1 pulgadas como monitor de eventos de la app.
-**Experimental: USB, pantalla, instalación C6 por SDIO y pruebas básicas de radio verificadas
-en la placa real; comunicación con Switch pendiente.** Se ha instalado el C6 desde el P4
-usando el USB de programación existente, sin adaptador UART. Requiere un C6 con ESP-Hosted
+**Experimental: intercambio FireRed/LeafGreen completado desde el Mac por USB.**
+La app también está instalada en un iPhone 16 Pro Max: Bluetooth, transferencia de datos
+sin pérdidas y eventos en pantalla verificados; intercambio desde iOS pendiente.
+El C6 se instala desde el P4 por SDIO, sin adaptador UART, en unidades con ESP-Hosted
 y OTA compatibles; CN5 sigue siendo la vía directa para otras unidades.
 
 [Hardware, compilación e instalación](docs/hardware_jc8012p4.md) ·

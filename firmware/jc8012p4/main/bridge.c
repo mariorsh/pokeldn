@@ -21,6 +21,7 @@
 static essl_handle_t s_link;
 static SemaphoreHandle_t s_bus;
 static atomic_bool s_ready;
+static atomic_bool s_bluetooth;
 static atomic_uint s_stage, s_signature, s_sdio_error;
 static sdmmc_card_t s_card;
 
@@ -40,14 +41,19 @@ static void panel_status(const uint8_t *radio, size_t length)
     char text[1280];
     int n = snprintf(text, sizeof(text),
         "%.*s bridge=jc8012p4 bridge_ready=%u bridge_stage=%u c6_signature=%08x "
-        "p4_revision=%u psram_bytes=%u p4_heap=%u p4_wire_dropped=%u p4_wire_bad=%u lcd_frames=%u sdio_error=%#x",
+        "p4_revision=%u psram_bytes=%u p4_heap=%u p4_wire_dropped=%u p4_wire_bad=%u lcd_frames=%u sdio_error=%#x ble_active=%u",
         (int)length, radio ? (const char *)radio : "", (unsigned)atomic_load(&s_ready),
         atomic_load(&s_stage), atomic_load(&s_signature), (unsigned)chip.revision,
-        (unsigned)esp_psram_get_size(), (unsigned)esp_get_free_heap_size(), (unsigned)wire_dropped(), (unsigned)wire_rx_bad(), jc_panel_frames(), atomic_load(&s_sdio_error));
+        (unsigned)esp_psram_get_size(), (unsigned)esp_get_free_heap_size(), (unsigned)wire_dropped(), (unsigned)wire_rx_bad(), jc_panel_frames(), atomic_load(&s_sdio_error), (unsigned)atomic_load(&s_bluetooth));
     if (n > 0) wire_send(0x89, text, (size_t)n < sizeof(text) ? n : sizeof(text) - 1, NULL, 0);
 }
 static void command(uint8_t type, const uint8_t *p, size_t n)
 {
+    if (atomic_load(&s_bluetooth)) {
+        if (type == 0x0b) panel_status(NULL, 0);
+        else result(type, ESP_ERR_INVALID_STATE);
+        return;
+    }
     if (type == 0x01) wire_credit_reset();
     if (type == 0x0b && !atomic_load(&s_ready)) {
         panel_status(NULL, 0);
@@ -97,7 +103,29 @@ static void receive(void *arg)
             const uint8_t *p;
             size_t n;
             if (jc_packet_unpack(rx, size, &type, &p, &n)) {
+                if (type == JC_MSG_HOST_TRANSPORT && n == 1) {
+                    atomic_store(&s_bluetooth, p[0] != 0);
+                    jc_panel_message(true, type, p, n);
+                    continue;
+                }
+                if (type == JC_MSG_DISPLAY_REQUEST && n >= 4) {
+                    uint8_t reply[8]; memcpy(reply, p, 4);
+                    esp_err_t status = jc_panel_display(p + 4, n - 4) ? ESP_OK : ESP_ERR_INVALID_ARG;
+                    memcpy(reply + 4, &status, 4);
+                    static DMA_ATTR uint8_t ack[64] __attribute__((aligned(64)));
+                    size_t length = jc_packet_pack(ack, sizeof(ack), JC_MSG_DISPLAY_RESULT, reply, sizeof(reply), NULL, 0);
+                    xSemaphoreTake(s_bus, portMAX_DELAY);
+                    esp_err_t sent = essl_send_packet(s_link, ack, length, 100);
+                    xSemaphoreGive(s_bus);
+                    if (sent != ESP_OK) jc_panel_note("Error confirmando pantalla Bluetooth");
+                    continue;
+                }
+                if (type < 0x80) {
+                    jc_panel_message(false, type, p, n);
+                    continue;
+                }
                 jc_panel_message(true, type, p, n);
+                if (atomic_load(&s_bluetooth)) continue;
                 if (type == 0x81 && n >= 14) {
                     /* MACs/revision belong to the C6; identify the programming target as P4.
                      * Numeric protocol capability version keeps upstream ALIVE support enabled. */
@@ -155,12 +183,20 @@ void app_main(void)
     ESP_ERROR_CHECK(essl_init(s_link, 2000));
     ESP_ERROR_CHECK(essl_wait_for_ready(s_link, 2000));
     atomic_store(&s_stage, 3);
-    bool signature_matches = true;
-    for (int i = 0; i < 4; ++i) {
-        uint8_t value;
-        ESP_ERROR_CHECK(essl_read_reg(s_link, i, &value, 1000));
-        atomic_fetch_or(&s_signature, (uint32_t)value << (i * 8));
-        if (value != JC_SDIO_MAGIC[i]) signature_matches = false;
+    bool signature_matches = false;
+    /* Function-ready can precede the C6 application's registers, especially
+     * when its bootloader verifies a larger Bluetooth image. */
+    for (unsigned attempt = 0; attempt < 100 && !signature_matches; ++attempt) {
+        uint32_t signature = 0;
+        signature_matches = true;
+        for (int i = 0; i < 4; ++i) {
+            uint8_t value = 0;
+            esp_err_t error = essl_read_reg(s_link, i, &value, 1000);
+            signature |= (uint32_t)value << (i * 8);
+            if (error != ESP_OK || value != JC_SDIO_MAGIC[i]) signature_matches = false;
+        }
+        atomic_store(&s_signature, signature);
+        if (!signature_matches) vTaskDelay(pdMS_TO_TICKS(100));
     }
     if (!signature_matches) {
         atomic_store(&s_stage, 4);

@@ -1,5 +1,6 @@
 /* Pure event reducer, also compiled on the development machine for protocol tests. */
 #include "events.h"
+#include "packet.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -22,7 +23,7 @@ void jc_events_command(jc_events_t *s, uint8_t type, const uint8_t *p, size_t n,
     s->last_host = now;
     if (type == 0x01) {
         s->watched = false;
-        jc_events_add(s, "App conectada por USB", now);
+        jc_events_add(s, s->bluetooth ? "App conectada por Bluetooth" : "App conectada por USB", now);
     } else if (type == 0x0f) s->watched = true;
     else if (type == 0x03 && n == 1) s->channel = p[0];
     else if ((type == 0x04 || type == 0x06 || type == 0x0a) && n) {
@@ -43,7 +44,15 @@ void jc_events_command(jc_events_t *s, uint8_t type, const uint8_t *p, size_t n,
 }
 void jc_events_radio(jc_events_t *s, uint8_t type, const uint8_t *p, size_t n, uint32_t now)
 {
-    if (type == 0xff) {
+    if (type == JC_MSG_HOST_TRANSPORT && n == 1) {
+        s->bluetooth = p[0] != 0;
+        s->host = false;
+        s->watched = false;
+        s->pending = 0;
+        s->radio.mode = SCENE_IDLE;
+        s->radio.stations = 0;
+        jc_events_add(s, s->bluetooth ? "Control desde iPhone / Bluetooth" : "Control USB disponible", now);
+    } else if (type == 0xff) {
         s->ready = false;
         s->radio.mode = SCENE_IDLE;
         s->radio.stations = 0;

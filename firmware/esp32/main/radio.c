@@ -701,8 +701,13 @@ static void send_info(void)
 #else
 #define LINK_WORD ""
 #endif
+#if POKELDN_JC8012_C6
+    snprintf(text, sizeof(text), "pokeldn-radio esp32p4 version=%s board=JC8012P4A1C_I_W_Y radio=esp32c6" LINK_WORD,
+             esp_app_get_description()->version);
+#else
     snprintf(text, sizeof(text), "pokeldn-radio " CONFIG_IDF_TARGET " version=%s idf=" IDF_VER LINK_WORD,
              esp_app_get_description()->version);
+#endif
     wire_send(MSG_INFO, head, sizeof(head), text, strlen(text));
     usbwatch_report();
 }
@@ -851,10 +856,16 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_wifi_start());
     esp_wifi_set_ps(WIFI_PS_NONE);
     start_sniffer();
-#if POKELDN_BLE
+#if POKELDN_BLE && !POKELDN_JC8012_C6
     ble_start();
 #endif
     wire_start(command);
+#if POKELDN_JC8012_C6
+    wire_log("C6 link ready: reset=%u heap=%u", (unsigned)esp_reset_reason(), (unsigned)esp_get_free_heap_size());
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    ble_start();
+    wire_log("BLE startup ready=%u heap=%u", ble_ready(), (unsigned)esp_get_free_heap_size());
+#endif
     usbwatch_start();
     led_start(led_state, button_pressed);
     display_start(display_state);

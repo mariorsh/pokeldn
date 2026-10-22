@@ -5,7 +5,7 @@
 typedef struct { uint32_t at; char text[JC_EVENT_TEXT]; } jc_event_t;
 typedef struct {
     scene_radio_t radio;
-    bool ready, host, watched;
+    bool ready, host, watched, bluetooth;
     uint8_t channel, pending, before_mode;
     uint32_t last_host, errors;
     jc_event_t events[JC_EVENTS];
