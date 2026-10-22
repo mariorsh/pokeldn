@@ -8,6 +8,7 @@
 
 #if POKELDN_BLE
 void ble_start(void);
+bool ble_ready(void);
 /* True while a central is subscribed to the TX characteristic: the wire then reads and writes here. */
 bool ble_linked(void);
 /* Host bytes written to RX, waiting up to `ticks`. */

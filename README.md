@@ -1,3 +1,18 @@
+# PokeChanger — fork para JC8012P4A1C_I_W_Y
+
+Adaptación de pokeldn para usar el ESP32-C6 integrado como radio LDN, el ESP32-P4 como
+puente USB y la pantalla de 10,1 pulgadas como monitor de eventos de la app.
+**Experimental: intercambio FireRed/LeafGreen completado desde el Mac por USB.**
+La app también está instalada en un iPhone 16 Pro Max: Bluetooth, transferencia de datos
+sin pérdidas y eventos en pantalla verificados; intercambio desde iOS pendiente.
+El C6 se instala desde el P4 por SDIO, sin adaptador UART, en unidades con ESP-Hosted
+y OTA compatibles; CN5 sigue siendo la vía directa para otras unidades.
+
+[Hardware, compilación e instalación](docs/hardware_jc8012p4.md) ·
+[Fork original](https://github.com/Decryptu/pokeldn)
+
+---
+
 <p align="center">
   <img src=".github/assets/banner.png" alt="pokeldn: ESP32-powered local wireless toolkit for Pokémon on Nintendo Switch" width="100%">
 </p>

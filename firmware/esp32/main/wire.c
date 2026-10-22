@@ -10,7 +10,9 @@
    docs/hardware_esp32.md, Supported boards. */
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
 #define WIRE_USB 1
+#if !POKELDN_BLE_LINK_ONLY
 #include "driver/usb_serial_jtag.h"
+#endif
 #else
 #define WIRE_USB 0
 #include "driver/uart.h"
@@ -197,7 +199,7 @@ void wire_set_baud(uint32_t baud)
     if (xQueueSend(s_out, &m, portMAX_DELAY) != pdTRUE) free(m);
 }
 
-#if WIRE_USB
+#if WIRE_USB && !POKELDN_BLE_LINK_ONLY
 /* IDF 6.1 usb_serial_jtag.c queues a whole frame or returns 0 on timeout.
    Drop after 500 ms without progress; a disconnected host must not hold the queue forever.
    docs/hardware_esp32.md, The USB host link. */
@@ -285,7 +287,9 @@ static void writer(void *arg)
 #endif
             continue;
         }
-#if WIRE_USB
+#if POKELDN_BLE_LINK_ONLY
+        /* A composed board owns its physical USB on another chip. */
+#elif WIRE_USB
         write_usb(encoded, out);
 #else
         uart_write_bytes(WIRE_UART, encoded, out);
@@ -347,12 +351,12 @@ static void deliver(const uint8_t *encoded, size_t used)
    docs/hardware_esp32.md, The serial ceiling. */
 static void reader(void *arg)
 {
-#if WIRE_USB
+#if WIRE_USB && !POKELDN_BLE_LINK_ONLY
     usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usb_config.rx_buffer_size = 16384;
     usb_config.tx_buffer_size = 16384;
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
-#else
+#elif !WIRE_USB
     const uart_config_t config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -363,8 +367,14 @@ static void reader(void *arg)
     };
     ESP_ERROR_CHECK(uart_driver_install(WIRE_UART, 16384, 16384, WIRE_UART_EVENTS, &s_uart_events, 0));
     ESP_ERROR_CHECK(uart_param_config(WIRE_UART, &config));
-    /* With CONFIG_ESP_CONSOLE_NONE nothing routes UART0 to GPIO1/3; the board stays mute without this. */
-    ESP_ERROR_CHECK(uart_set_pin(WIRE_UART, 1, 3, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    /* With CONFIG_ESP_CONSOLE_NONE route UART0 explicitly to the board's USB bridge. */
+    ESP_ERROR_CHECK(uart_set_pin(WIRE_UART,
+#if CONFIG_IDF_TARGET_ESP32P4
+                                 37, 38, /* JC8012: CH340C to UART0 */
+#else
+                                 1, 3,
+#endif
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     /* The driver drains the 128-byte FIFO at 120 by default: 8 bytes, 53 us at 1500000, and a
        Scarlet seat's opening overflowed it 235 times. At 32 the margin is 640 us.
        docs/hardware_esp32.md, The serial ceiling. */
@@ -376,13 +386,23 @@ static void reader(void *arg)
     size_t used = 0;
     bool overflow = false;
     for (;;) {
+#if POKELDN_BLE_LINK_ONLY
+        if (!ble_linked()) {
+            used = 0;
+            overflow = false;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+#endif
         const int64_t turn = esp_timer_get_time();
         int n;
 #if POKELDN_BLE
         if (ble_linked()) n = ble_read(chunk, sizeof(chunk), pdMS_TO_TICKS(20)); else
 #endif
         {
-#if WIRE_USB
+#if POKELDN_BLE_LINK_ONLY
+        n = 0;
+#elif WIRE_USB
         /* The USB driver returns whatever is buffered as soon as there is any, so one call does both. */
         n = usb_serial_jtag_read_bytes(chunk, sizeof(chunk), pdMS_TO_TICKS(20));
 #else

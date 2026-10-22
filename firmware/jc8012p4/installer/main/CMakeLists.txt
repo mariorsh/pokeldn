@@ -1,0 +1,8 @@
+idf_component_register(SRCS "main.c" INCLUDE_DIRS "." PRIV_REQUIRES nvs_flash esp_event esp_timer esp_app_format mbedtls bootloader_support esp_driver_uart)
+if(CONFIG_POKECHANGER_C6_INSTALLER_WRITE)
+    set(c6_app "${CMAKE_CURRENT_SOURCE_DIR}/../../radio/build/pokechanger_radio.bin")
+    if(NOT EXISTS "${c6_app}")
+        message(FATAL_ERROR "Build firmware/jc8012p4/radio first")
+    endif()
+    target_add_binary_data(${COMPONENT_LIB} "${c6_app}" BINARY RENAME_TO c6_radio)
+endif()

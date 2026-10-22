@@ -1,5 +1,7 @@
 #if POKELDN_BLE
 #include "ble.h"
+#include "wire.h"
+#include "esp_system.h"
 
 #include <stdatomic.h>
 #include <string.h>
@@ -28,6 +30,7 @@ static atomic_int s_conn = -1;
 static atomic_bool s_subscribed;
 static atomic_uint s_mtu = 23;
 static atomic_uint s_interval_us;   /* the connection interval the central granted; STATUS ble_itvl_us */
+static atomic_bool s_ready;
 
 static int rx_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -141,10 +144,20 @@ void ble_start(void)
 {
     /* FLOW_WINDOW (8 KB) plus one frame: the host never has more in flight. */
     s_rx = xStreamBufferCreate(10240, 1);
+#if POKELDN_JC8012_C6
+    wire_log("BLE init: heap=%u RX=%u", (unsigned)esp_get_free_heap_size(), s_rx != NULL);
+    if (!s_rx) return;
+#endif
 #if CONFIG_IDF_TARGET_ESP32
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
 #endif
-    ESP_ERROR_CHECK(nimble_port_init());
+    esp_err_t error = nimble_port_init();
+#if POKELDN_JC8012_C6
+    wire_log("NimBLE init=%#x heap=%u", error, (unsigned)esp_get_free_heap_size());
+    if (error != ESP_OK) return;
+#else
+    ESP_ERROR_CHECK(error);
+#endif
     ble_hs_cfg.sync_cb = on_sync;
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -153,7 +166,10 @@ void ble_start(void)
     ble_att_set_preferred_mtu(247);
     ble_svc_gap_device_name_set("POKELDN-RADIO");
     nimble_port_freertos_init(host_task);
+    atomic_store(&s_ready, true);
 }
+
+bool ble_ready(void) { return atomic_load(&s_ready); }
 
 bool ble_linked(void) { return atomic_load(&s_subscribed); }
 

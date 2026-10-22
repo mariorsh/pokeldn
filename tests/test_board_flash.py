@@ -235,3 +235,10 @@ def test_an_update_is_offered_only_for_a_newer_included_image(tmp_path, monkeypa
     assert board.image_info(image) == ("pokeldn_pad", included)
     assert board.update_for(installed, "pad", "ESP32-S3") == offered
     assert board.update_for(installed, "pad", "ESP32-C3") == ""    # the controller does not run on a C3
+
+
+def test_jc8012_requires_its_two_images_before_any_flash_write(flasher):
+    flasher.chip = Chip("ESP32-P4")
+    with pytest.raises(esptool.FatalError, match="two firmware projects"):
+        board.flash("COM4")
+    assert not flasher.writes and flasher.chip.closed

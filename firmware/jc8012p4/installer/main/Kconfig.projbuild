@@ -1,0 +1,8 @@
+menu "PokeChanger C6 installer"
+config POKECHANGER_C6_INSTALLER_WRITE
+    bool "Include C6 application and enable explicit serial INSTALL command"
+    default n
+    help
+        Default build only queries the C6. This option embeds the radio app;
+        writing still requires INSTALL followed by its exact SHA256 on UART0.
+endmenu

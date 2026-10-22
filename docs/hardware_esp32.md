@@ -11,6 +11,12 @@ action frames and Ethernet frames; advertisement crypto, LDN authentication, IP 
 host. `pokeldn.ldn.esp32_wlan` gives the LDN library a factory backed by the board, so `ldn.scan`,
 `ldn.connect` and `ldn.create_network` run unchanged and the host needs no Wi-Fi driver.
 
+## JC8012 P4/C6 (experimental fork)
+
+The JC8012P4A1C_I_W_Y has a separate P4 USB/display processor and C6 radio. Use the
+[two-chip port and installation guide](hardware_jc8012p4.md), not the generic C6 image.
+Both images compile. P4 USB and the display have been tested on hardware; C6 radio and Switch communication remain unverified.
+
 ## Supported boards
 
 | chip | host connection | merged image |
